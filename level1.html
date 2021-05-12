@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Level 1</title>
+</head>
+<body>
+    <h1 align="center">Monthly Temperature of Hong Kong</h1>
+    <aside style="margin-left:750px; float: left;">
+        <p>Temperature: <select id="temperature">
+          <option value="min">MIN</option>
+          <option value="max">MAX</option>
+        </select>
+    </aside>
+    <div style="float: left;">
+        <div style="float: top; margin-left: 33px" id="my_dataviz"></div>
+        <svg style="float: top;" id="my_legend" height=200 width=220></svg>
+    </div>
+
+    <script src="https://d3js.org/d3.v4.js"></script>
+    <script>
+        let margin = {top: 30, right: -200, bottom: 30, left: 200},
+            width = 1000 - margin.left - margin.right,
+            height = 500 - margin.top - margin.bottom;
+        let x = document.body.clientWidth,
+            y = document.body.clientHeight;
+
+        let svg = d3.select("#my_dataviz")
+            .append("svg")
+            .attr("width", width + margin.left - margin.right )
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", "translate(" + margin.left + "," + margin.top +" )");
+
+        let months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+            'September', 'October', 'November', 'December'];
+
+        // load and preprocess the data
+        d3.csv("temperature_daily.csv",function(error, data){
+            if(error) throw error;
+
+            data.forEach(function(row){
+                row.min_temperature = parseFloat(row.min_temperature);
+                row.max_temperature = parseFloat(row.max_temperature);
+                let date = row.date.split('-');
+                row.year = parseInt(date[0]);
+                row.month = parseInt(date[1]);
+                row.day = parseInt(date[2]);
+            });
+
+            // group data by year and month
+            let nest = d3.nest().key(function(d){
+                return d.year;
+            }).key(function(d){
+                return d.month;
+            }).rollup(function(days){
+                return {
+                    max: d3.max(days,function(d){
+                        return d.max_temperature;
+                    }),
+                    min: d3.min(days, function(d){
+                        return d.min_temperature;
+                    })
+                }
+            }).entries(data);
+
+            // convert group data for good visualization
+            result = [];
+            for (let i = 0; i < nest.length; i++){
+                for (let j = 0; j < nest[i].values.length; j++){
+                    let tmp = {"year": nest[i].key, "month": nest[i].values[j].key,
+                    "max": nest[i].values[j].value.max, "min": nest[i].values[j].value.min};
+                    result.push(tmp);
+                }
+            }
+            console.log(result);
+
+            // find the year list
+            let years = d3.map(nest, function(d){return d.key;}).keys()
+
+            // build x and y axis
+            let x = d3.scaleBand()
+              .range([0, width])
+              .domain(years)
+              .padding(0.1)
+
+            let y = d3.scaleBand()
+              .range([0, height])
+              .domain(months)
+              .padding(0.1)
+
+            svg.append("g")
+              .call(d3.axisTop(x));
+
+            svg.append("g")
+              .call(d3.axisLeft(y));
+
+            // bulid color scale
+            let colorCold = d3.scaleLinear()
+              .range(['#FDFDBE', '#F36D43'])
+              .domain([0, 20])
+            let colorWarm = d3.scaleLinear()
+              .range(['#F36D43', '#9D0125'])
+              .domain([20, 40])
+
+            function color(temperature){
+                if (temperature < 20) {
+                    return colorCold(temperature);
+                } else {
+                    return colorWarm(temperature);
+                }
+            }
+
+            // create heatmap
+            let heatmap = svg.selectAll("heatmap")
+              .data(result, function(d) {return d.year+'-'+d.month;})
+              .enter()
+              .append("rect")
+              .attr('x', function(d) {return x(d.year);})
+              .attr('y', function(d) {return y(months[parseInt(d.month)-1]);})
+              .attr('width', x.bandwidth())
+              .attr('height', y.bandwidth())
+              .style('fill', function(d) {return color(d.min)})
+
+            // change mode of min and max on click
+            function colorChange(mode){
+                if(mode == "min"){
+                    heatmap.style('fill', function(d) {return color(d.min)})
+                }
+                else{
+                    heatmap.style('fill', function(d) {return color(d.max)})
+                }
+            }
+
+            d3.select("#temperature").on("change", function(d){
+                mode = this.value
+                colorChange(mode)
+            })
+
+            // create a tooltip
+            let Tooltip = d3.select("#my_dataviz")
+              .append("div")
+              .style("opacity", 0)
+              .style("position","absolute")
+              .attr("class", "tooltip")
+              .style("background-color", "white")
+              .style("border", "solid")
+              .style("border-width", "0")
+              .style("padding", "8px")
+              .style("font-size", "5px")
+
+            //change the tooltip when user hover / move / leave a cell
+            let mouseover = function(d){
+                Tooltip
+                  .style("opacity", 1)
+                d3.select(this)
+                  .style("stroke", "black")
+                  .style("opacity", 1)
+            }
+
+            let mousemove = function(d){
+                Tooltip
+                  .html("Date: "+ d.year  + "-" + d.month + " Max: " + d.max+ " Min: " + d.min)
+                  .style("left", (event.pageX + 20) + "px")
+                  .style("top",(event.pageY) + "px")
+            }
+
+            let mouseleave = function(d){
+                Tooltip
+                  .style("opacity", 0)
+                d3.select(this)
+                  .style("stroke", "none")
+                  .style("opacity", 1)
+            }
+
+            // add the squares
+            heatmap
+                .on("mouseover", mouseover)
+                .on("mousemove", mousemove)
+                .on("mouseleave", mouseleave)
+
+            // create a legend
+            let legend = d3.select("#my_legend")
+            let keys = ["40 Celsius", "20 Celsius ", "0 Celsius"]
+            let colors = d3.scaleOrdinal()
+                .domain(keys)
+                .range(['#9D0125', '#F36D43', '#FDFDBE']);
+            let size = 20
+
+            legend.selectAll("mydots")
+                .data(keys)
+                .enter()
+                .append("rect")
+                .attr("x", 40)
+                .attr("y", function(d, i) { return 50+i*(size+5); })
+                .attr("width", size)
+                .attr("height", size+5)
+                .style("fill", function(d) { return colors(d) });
+
+            legend.selectAll("mylabels")
+                .data(keys)
+                .enter()
+                .append("text")
+                .text(function(d) { return d; })
+                .attr("x", 40+size*1.2)
+                .attr("y", function(d, i) { return 50+i*(size+5) +(size/2); })
+                .attr("text-anchor", 'left')
+                .style("alignment-baseline", "middle")
+
+
+
+
+        });
+    </script>
+</body>
+</html>
